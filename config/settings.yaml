@@ -1,0 +1,65 @@
+﻿# ============================================================
+# 达人对接系统 - 配置文件
+# ============================================================
+
+# --- 采集层配置 ---
+scraper:
+  # MediaCrawler 根目录
+  media_crawler_path: "./MediaCrawler"
+  
+  # 支持的平台
+  platforms:
+    - xhs       # 小红书
+    - dy        # 抖音
+    - ks        # 快手
+    - bili      # B站
+    - weibo     # 微博
+  
+  # 默认搜索参数
+  search:
+    max_notes: 50
+    max_comments: 100
+    sort_type: "general"     # general / popularity / latest
+  
+  # 请求控制
+  request:
+    delay_min: 1.0
+    delay_max: 3.0
+    max_retries: 3
+    timeout: 30
+
+# --- Agent 智能层配置 ---
+agent:
+  provider: "deepseek"              # openai / deepseek / siliconflow
+  api_key_env: "OPENAI_API_KEY"
+  api_base: "https://api.deepseek.com/v1"
+  model: "deepseek-chat"
+  temperature: 0.1
+  max_tokens: 2000
+  
+  capabilities:
+    extract_contact: true
+    classify_category: true
+    score_oem_potential: true
+    identify_intent: true
+    summarize_profile: true
+
+# --- 存储层配置 ---
+database:
+  path: "./data/leads.db"
+
+# --- 导出层配置 ---
+export:
+  default_format: "xlsx"
+  output_dir: "~/Desktop"
+
+# --- 赛道定义 ---
+categories:
+  - 健康食品
+  - 美妆护肤
+  - 数码3C
+  - 母婴用品
+  - 家居生活
+  - 运动户外
+  - 宠物用品
+  - 服饰穿搭
