@@ -7,6 +7,10 @@ import argparse
 import yaml
 from pathlib import Path
 
+# Windows GBK 终端无法输出 emoji，强制 UTF-8
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 sys.path.insert(0, str(Path(__file__).parent))
 from dotenv import load_dotenv
 load_dotenv()
