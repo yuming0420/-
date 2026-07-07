@@ -10,13 +10,23 @@ from typing import Optional
 class AgentExtractor:
     """使用 LLM 从原始达人数据中智能提取结构化信息"""
 
-    EXTRACT_PROMPT = """你是一个电商达人分析专家，服务于一家大健康食品 OEM/ODM 代工企业（山东朱氏药业）。
-请从给定的达人社媒主页数据中提取以下信息，以 JSON 格式返回。
+    EXTRACT_PROMPT = """你是一个电商达人分析专家，服务于一家大健康食品 OEM/ODM 代工企业。
+该企业的核心业务是：为品牌方代工生产健康食品、功能性食品、保健品、代餐、滋补品等。
+你需要严格判断一个达人是否是该企业的潜在合作对象（即达人本身有带货健康食品类产品的能力和受众）。
+
+## 目标客户画像（极其重要）
+目标客户必须是**内容与健康/食品/养生/减脂/健身/母婴营养直接相关的个体达人**。
+以下类型**不是**目标客户，无论粉丝多少：
+- 娱乐搞笑/剧情/颜值/才艺类达人（即使偶尔发过美食内容）
+- MCN机构/传媒公司/公会/直播公司（他们是服务方，不是带货达人）
+- 纯粹的企业号/品牌号
+- 泛生活 vlog 博主（内容太分散，没有健康食品垂直受众）
+- 探店/吃播类达人（除非主攻健康食品测评方向）
 
 ## 身份判断
 首先判断该账号是"个体达人"还是"MCN/机构/传媒公司"：
-- 个体达人：个人创作者，内容是日常生活/知识分享/带货
-- MCN/机构：简介中出现"传媒""MCN""经纪""孵化""机构""公会""公司""科技"等关键词，或内容涉及达人招募/行业培训/商业服务
+- 个体达人：个人创作者，内容以个人IP为核心，面向C端消费者
+- MCN/机构：简介中出现"传媒""MCN""经纪""孵化""机构""公会""公司""直播公司""文化传播"等关键词，或内容涉及达人招募/行业培训/账号代运营
 
 ## 提取字段
 1. account_type: "creator"（个体达人）或 "mcn"（MCN/机构/传媒公司）
@@ -25,21 +35,31 @@ class AgentExtractor:
 4. phone: 手机号（通常在商务合作栏，如无则填 null）
 5. contact_source: 联系方式来源（bio/comment/manual）
 6. category: 赛道分类，从以下选项选一个最匹配的: {categories}
+   判断标准：以达人**持续输出的核心内容主题**为准，不是看他简介里写过什么词。
+   如果达人内容与所有赛道都不匹配（如纯粹娱乐/剧情/颜值/传媒公司日常），
+   则填写最后一个选项"其他/不相关"。
 7. tags: 内容标签，最多5个，以数组返回
-8. oem_score: OEM合作潜力评分(0-100)，评分标准:
-   - 粉丝量(0-30): <1万得5, 1-10万得10, 10-50万得20, >50万得30
-   - 内容垂直度(0-25): 专注于单一赛道得高分
-   - 互动率(0-25): 点赞/粉丝比 >5%得20+
-   - 品牌合作历史(0-20): 主页可见商务合作痕迹
-9. oem_reason: 评分简要理由(一句话)
+8. oem_score: 大健康食品OEM合作潜力评分(0-100)，评分标准:
+   - 内容-业务匹配度(0-40): 这是最关键维度。
+     * 达人内容直接围绕健康饮食/营养科普/减脂餐/养生/保健品测评 → 30-40
+     * 达人内容涉及美食/做饭但对健康有侧重 → 15-30
+     * 达人内容是泛美食/吃播/探店，无健康侧重 → 5-15
+     * 达人内容与食品无关（娱乐/剧情/颜值/传媒）→ 0-5
+   - 目标受众精准度(0-25): 粉丝画像是否与健康食品消费者重叠
+     * 粉丝主要是25-45岁关注健康的女性 → 20-25
+     * 粉丝画像分散或偏年轻娱乐 → 5-15
+   - 互动质量(0-20): 评论是否有产品咨询/求链接等购买意图，而非纯表情/夸赞
+   - 商业可信度(0-15): 账号是否有规范的商务合作入口、内容制作精良、无低质搬运
+   注意：粉丝量不作为主要评分依据——1万精准粉丝的价值远超100万泛粉。
+9. oem_reason: 评分简要理由（聚焦"内容是否与大健康食品相关"）
 10. intent_signal: 合作意向信号描述（如简介写了"欢迎合作""商务联系"等）
 11. intent_level: 意向等级(high/medium/low)
 12. summary: 一句话摘要(20字以内)
-13. mcn_focus: 仅当 account_type 为 "mcn" 时填写。推断该 MCN/机构主攻的赛道和产品方向，
-    例如"健康食品/美妆护肤/服饰穿搭/本地生活"。如果账号是达人则填 null。
+13. mcn_focus: 仅当 account_type 为 "mcn" 时填写。推断该 MCN/机构主攻的赛道和产品方向。
+    如果账号是达人则填 null。
 14. mcn_relevance: 仅当 account_type 为 "mcn" 时填写。该机构业务与大健康 OEM 代工的匹配度(0-100)。
-    评分维度: 如果其主攻赛道与健康食品/代餐/保健品/功能性食品相关则高分(70+)，
-    与美妆/母婴相关则中等(40-69)，与数码/游戏等无关则低分(<40)。
+    评分维度: 如果其签约达人集中在健康食品/保健品/母婴营养赛道 → 70+，
+    美妆/个护/生活方式 → 40-69，娱乐/游戏/剧情 → <40。
     如果账号是达人则填 null。
 
 ## 原始数据
@@ -49,6 +69,7 @@ class AgentExtractor:
 - 只返回 JSON，不要有其他文字
 - 所有字段都必须存在，无信息则填 null
 - oem_score 和 mcn_relevance 必须是 0-100 的数字
+- category 如无法匹配任何预设赛道则填 "其他/不相关"
 """
 
     def __init__(self, config: dict):
@@ -145,20 +166,54 @@ class AgentExtractor:
         }
 
     def _heuristic_oem(self, data: dict) -> float:
-        """启发式 OEM 评分,无需 LLM"""
-        score = 0.0
-        followers = int(data.get("followers", 0))
-        if followers < 10000: score += 5
-        elif followers < 100000: score += 10
-        elif followers < 500000: score += 20
-        else: score += 30
+        """启发式 OEM 评分 - 以内容匹配度为核心，粉丝量仅作微调"""
+        score = 25.0  # 基准分偏低，表示需要证据支撑
+        bio = (data.get("bio") or data.get("desc") or data.get("signature") or "").lower()
+        nickname = (data.get("nickname") or data.get("name") or "").lower()
 
-        likes = int(data.get("avg_likes", 0))
+        # --- 内容匹配度 (最关键维度) ---
+        health_keywords = [
+            "健康", "营养", "减脂", "减肥", "养生", "保健", "滋补", "代餐",
+            "低卡", "无糖", "控糖", "膳食", "食疗", "草本", "功能性食品",
+            "蛋白质", "维生素", "肠道", "益生菌", "酵素", "轻食", "超级食物",
+            "健身餐", "增肌", "健康饮食", "clean eating", "diet", "nutrition",
+        ]
+        food_general = ["美食", "做饭", "吃播", "料理", "烘焙", "探店", "零食", "吃货"]
+        mcn_signals = ["传媒", "mcn", "经纪", "孵化", "公会", "机构", "直播公司", "文化传播",
+                       "代运营", "招募", "素人", "主播培训", "陪跑"]
+
+        # 减分: MCN/机构信号
+        for kw in mcn_signals:
+            if kw in bio or kw in nickname:
+                score -= 20
+                break
+
+        # 加分: 健康食品垂直关键词
+        health_hits = sum(1 for kw in health_keywords if kw in bio)
+        if health_hits >= 3:
+            score += 35
+        elif health_hits >= 1:
+            score += 20
+
+        # 泛美食但没有健康侧重 → 不加分
+        if health_hits == 0:
+            food_hits = sum(1 for kw in food_general if kw in bio)
+            if food_hits > 0:
+                score += 5  # 仅微调
+
+        # --- 互动率微调 ---
+        followers = int(data.get("followers", 0) or 0)
+        likes = int(data.get("avg_likes", 0) or 0)
         if followers > 0 and likes > 0:
             rate = likes / followers
-            if rate > 0.1: score += 25
-            elif rate > 0.05: score += 15
-            elif rate > 0.02: score += 10
-            else: score += 5
+            if rate > 0.1: score += 10
+            elif rate > 0.05: score += 5
 
-        return min(score, 100.0)
+        # --- 联系方式奖励 ---
+        import re
+        if re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', bio):
+            score += 5
+        if re.search(r'(?:VX|vx|wx|微信|WeChat)\s*[:：]?\s*([a-zA-Z0-9_-]{5,20})', bio):
+            score += 5
+
+        return min(max(score, 0.0), 100.0)
